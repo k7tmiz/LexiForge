@@ -1,5 +1,7 @@
 # LexiForge
 
+[中文](../README.md) | [English](README.en.md)
+
 Universal Vocabulary TXT → JSON Converter
 
 LexiForge is a production-oriented, offline-first TXT → JSON vocabulary converter that runs 100% in the browser. Paste raw word lists from textbooks, PDFs, webpages, or notes, then export a clean JSON wordbook for flashcards or your own vocabulary system.

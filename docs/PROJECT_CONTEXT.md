@@ -1,5 +1,10 @@
 # Project Context: LexiForge
 
+## Docs
+
+- Chinese: `README.md`
+- English: `docs/README.en.md`
+
 ## Goal
 
 LexiForge is a pure-frontend, offline-first “universal vocabulary TXT → JSON converter” designed for real usage (not a demo). All parsing and processing happen locally in the browser.
@@ -32,7 +37,7 @@ LexiForge is a pure-frontend, offline-first “universal vocabulary TXT → JSON
   - Deduplication (keep first term)
   - Table editor integration and live JSON refresh
   - Drag-and-drop import integration
-  - Language hint update for `auto`
+  - Auto-language label update after conversion
 - `js/ui.js`
   - DOM getters/setters, stats rendering, empty-state toggle, output-mode card highlight
 - `js/theme.js`
@@ -44,7 +49,7 @@ LexiForge is a pure-frontend, offline-first “universal vocabulary TXT → JSON
   - Centralized text dictionary + DOM apply via data attributes
   - Persists `uiLanguage` to localStorage
 - `js/detectLanguage.js`
-  - Heuristic term-based detection for UI hint (Japanese/Chinese/Spanish/German/English/Unknown)
+  - Heuristic term-based detection for UI hint (Japanese/Chinese/Spanish/German/English/Unrecognized)
   - Does not overwrite user-selected language
 - `js/fileImport.js`
   - Drag & drop import for `.txt/.tsv/.csv/.json`
