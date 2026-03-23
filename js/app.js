@@ -5,7 +5,8 @@
 */
 (() => {
   const { safeJsonStringify, debounce, storage, toSafeFilenameBase, downloadTextFile, copyToClipboard } = window.LexiForge.Utils;
-  const { parseText, buildLexiconObject } = window.LexiForge.Parser;
+  const Parser = window.LexiForge.Parser;
+  const { buildLexiconObject } = Parser;
   const UI = window.LexiForge.UI;
 
   const VERSION = "0.2.1";
@@ -244,7 +245,8 @@ hola\t 你好
     });
 
     function doConvert(state) {
-      const parsed = parseText(state.inputText);
+      // 解析分发：Markdown 走 Parser.parseInput；普通文本保持原 Parser.parseText
+      const parsed = Parser.parseInput ? Parser.parseInput(state.inputText) : Parser.parseText(state.inputText);
       const deduped = dedupeWords(parsed.words);
       currentWords = deduped.words;
       dupRemovedCount = deduped.removed;
