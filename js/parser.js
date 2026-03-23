@@ -38,203 +38,6 @@
   const LEADING_POS_RE = new RegExp(`^(${POS_ALT})\\s+`, "i");
   const POS_ANYWHERE_RE = new RegExp(`\\s(${POS_ALT})(?=\\s+)`, "i");
 
-  // Markdown：内联语法去除（强调/链接/代码等），供表格/列表/段落复用
-  function stripMarkdownInlineSyntax(text) {
-    let s = String(text == null ? "" : text);
-    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "$1");
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
-    s = s.replace(/`([^`]+)`/g, "$1");
-    s = s.replace(/~~([^~]+)~~/g, "$1");
-    s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
-    s = s.replace(/__([^_]+)__/g, "$1");
-    s = s.replace(/\*([^*]+)\*/g, "$1");
-    s = s.replace(/_([^_]+)_/g, "$1");
-    s = s.replace(/<\/?[^>]+>/g, "");
-    s = s.replace(/\\([\\`*_{}\[\]()#+\-.!|>])/g, "$1");
-    s = s.replace(/\u00a0/g, " ").replace(/[\u200b-\u200d\uFEFF]/g, "");
-    return s.replace(/\s+/g, " ").trim();
-  }
-
-  // Markdown：按行归一化（去掉 fenced code block，保留文本结构）
-  function normalizeMarkdownLines(text) {
-    const rawLines = splitLines(String(text || ""));
-    const out = [];
-    let inFence = false;
-    let fenceToken = "";
-    for (const rawLine of rawLines) {
-      const line = String(rawLine == null ? "" : rawLine).replace(/\u00a0/g, " ").replace(/[\u200b-\u200d\uFEFF]/g, "");
-      const trimmed = line.trim();
-      const fenceMatch = trimmed.match(/^(```+|~~~+)\s*/);
-      if (fenceMatch) {
-        const token = fenceMatch[1];
-        if (!inFence) {
-          inFence = true;
-          fenceToken = token[0];
-        } else if (token[0] === fenceToken) {
-          inFence = false;
-          fenceToken = "";
-        }
-        continue;
-      }
-      if (inFence) continue;
-      out.push(line);
-    }
-    return out;
-  }
-
-  // Markdown：表格分隔行（| --- | :---: |）判定
-  function isMarkdownTableSeparatorCells(cells) {
-    const list = Array.isArray(cells) ? cells : [];
-    if (list.length < 2) return false;
-    for (const c of list) {
-      const s = String(c || "").trim();
-      if (!s) return false;
-      if (!/^:?-{3,}:?$/.test(s.replace(/\s+/g, ""))) return false;
-    }
-    return true;
-  }
-
-  // Markdown：稳定拆分表格行（处理首尾竖线与 \| 转义）
-  function splitMarkdownRowToCells(row) {
-    const s = String(row == null ? "" : row);
-    const cells = [];
-    let cur = "";
-    let esc = false;
-    for (let i = 0; i < s.length; i += 1) {
-      const ch = s[i];
-      if (esc) {
-        cur += ch;
-        esc = false;
-        continue;
-      }
-      if (ch === "\\") {
-        esc = true;
-        continue;
-      }
-      if (ch === "|") {
-        cells.push(cur);
-        cur = "";
-        continue;
-      }
-      cur += ch;
-    }
-    cells.push(cur);
-
-    const trimmed = s.trim();
-    let out = cells;
-    if (trimmed.startsWith("|")) out = out.slice(1);
-    if (trimmed.endsWith("|")) out = out.slice(0, -1);
-    return out.map((c) => String(c == null ? "" : c).trim());
-  }
-
-  function isMarkdownTableRowLine(line) {
-    const s = String(line || "");
-    const trimmed = s.trim();
-    if (!trimmed) return false;
-    if (trimmed.startsWith("#")) return false;
-    if (trimmed.startsWith(">")) return false;
-    const pipeCount = (trimmed.match(/\|/g) || []).length;
-    if (pipeCount < 2) return false;
-    const cells = splitMarkdownRowToCells(trimmed);
-    return cells.length >= 2;
-  }
-
-  // Markdown：解析连续表格块为标准 entries（忽略表头与分隔行）
-  function parseMarkdownTable(lines) {
-    try {
-      const list = Array.isArray(lines) ? lines : [];
-      if (!list.length) return [];
-
-      let startIndex = 0;
-      if (list.length >= 2) {
-        const maybeSep = splitMarkdownRowToCells(list[1]);
-        if (isMarkdownTableSeparatorCells(maybeSep)) startIndex = 2;
-      }
-
-      const out = [];
-      for (let i = startIndex; i < list.length; i += 1) {
-        const row = String(list[i] || "").trim();
-        if (!row) continue;
-        const rawCells = splitMarkdownRowToCells(row);
-        if (isMarkdownTableSeparatorCells(rawCells)) continue;
-        if (rawCells.length < 3) continue;
-
-        const cells = rawCells.map((c) => stripMarkdownInlineSyntax(c));
-        const term = normalizeTerm(cells[0]);
-        const pos = String(cells[1] || "").replace(/\s+/g, " ").trim();
-        let meaning = stripMarkdownInlineSyntax(cells[2]);
-        if (cells.length > 3) {
-          meaning = [meaning, ...cells.slice(3)].filter(Boolean).join(" | ");
-        }
-        const normalizedMeaning = normalizeMeaning(meaning);
-        if (!term || !normalizedMeaning) continue;
-        out.push({ term, pos: pos || "", meaning: normalizedMeaning });
-      }
-      return out;
-    } catch (err) {
-      return [];
-    }
-  }
-
-  function parseMarkdownListItem(line) {
-    const trimmed = String(line || "").trim();
-    const m = trimmed.match(/^(\s*[-*+]\s+)(\[[ xX]\]\s+)?(.*)$/);
-    if (!m) return null;
-    const body = String(m[3] || "").trim();
-    if (!body) return null;
-
-    if ((body.match(/\|/g) || []).length >= 2) {
-      const rawCells = splitMarkdownRowToCells(body);
-      if (rawCells.length >= 3) {
-        const cells = rawCells.map((c) => stripMarkdownInlineSyntax(c));
-        const term = normalizeTerm(cells[0]);
-        const pos = String(cells[1] || "").replace(/\s+/g, " ").trim();
-        const meaning = normalizeMeaning([cells[2], ...cells.slice(3)].filter(Boolean).join(" | "));
-        if (!term || !meaning) return null;
-        return { term, pos: pos || "", meaning };
-      }
-    }
-
-    const bodyPlain = stripMarkdownInlineSyntax(body);
-    const idx = bodyPlain.indexOf("：") >= 0 ? bodyPlain.indexOf("：") : bodyPlain.indexOf(":");
-    if (idx > 0) {
-      const term = normalizeTerm(bodyPlain.slice(0, idx).trim());
-      const meaningPart = bodyPlain.slice(idx + 1).trim();
-      if (!term || !meaningPart) return null;
-      const { pos, meaning } = extractLeadingPos(meaningPart);
-      const normalizedMeaning = normalizeMeaning(meaning);
-      if (!normalizedMeaning) return null;
-      return { term, pos: pos || "", meaning: normalizedMeaning };
-    }
-
-    return null;
-  }
-
-  // Markdown：输入检测（表格优先；列表/标题为辅助信号）
-  function isMarkdownInput(text) {
-    const lines = normalizeMarkdownLines(text);
-    let tableSepCount = 0;
-    let tableRowCount = 0;
-    let mdSignalCount = 0;
-    for (let i = 0; i < lines.length && i < 80; i += 1) {
-      const s = String(lines[i] || "").trim();
-      if (!s) continue;
-      if (/^#{1,6}\s+/.test(s)) mdSignalCount += 1;
-      if (/^\s*[-*+]\s+/.test(s)) mdSignalCount += 1;
-      if (/\*\*[^*]+\*\*/.test(s) || /`[^`]+`/.test(s) || /\[[^\]]+\]\([^)]+\)/.test(s)) mdSignalCount += 1;
-
-      if (isMarkdownTableRowLine(s)) {
-        tableRowCount += 1;
-        const cells = splitMarkdownRowToCells(s);
-        if (isMarkdownTableSeparatorCells(cells)) tableSepCount += 1;
-      }
-    }
-    if (tableSepCount >= 1) return true;
-    if (tableRowCount >= 4 && mdSignalCount >= 1) return true;
-    if (mdSignalCount >= 3 && tableRowCount >= 2) return true;
-    return false;
-  }
-
   function cleanRawLine(line) {
     return String(line || "")
       .replace(/\u00a0/g, " ")
@@ -365,81 +168,172 @@
     };
   }
 
-  // Markdown：将整段 Markdown 解析为 entries；同时复用原有 parseLine 兜底解析普通行
-  function parseMarkdownToWordEntries(text) {
-    try {
-      const lines = normalizeMarkdownLines(text);
-      const out = [];
-      let i = 0;
-      while (i < lines.length) {
-        const raw = String(lines[i] || "");
-        const s = raw.trim();
-        if (!s) {
-          i += 1;
-          continue;
-        }
-
-        if (/^<!--/.test(s)) {
-          i += 1;
-          continue;
-        }
-        if (/^#{1,6}\s+/.test(s)) {
-          i += 1;
-          continue;
-        }
-        if (/^\s*>/.test(s)) {
-          i += 1;
-          continue;
-        }
-        if (/^[-*_]{3,}\s*$/.test(s)) {
-          i += 1;
-          continue;
-        }
-
-        if (isMarkdownTableRowLine(s)) {
-          const block = [];
-          while (i < lines.length && isMarkdownTableRowLine(String(lines[i] || "").trim())) {
-            block.push(String(lines[i] || "").trim());
-            i += 1;
-          }
-          const entries = parseMarkdownTable(block);
-          if (entries.length) out.push(...entries);
-          continue;
-        }
-
-        const listWord = parseMarkdownListItem(s);
-        if (listWord) {
-          out.push(listWord);
-          i += 1;
-          continue;
-        }
-
-        const plain = stripMarkdownInlineSyntax(s);
-        const res = parseLine(plain);
-        if (res && res.ok) out.push(res.word);
-        i += 1;
-      }
-      return out;
-    } catch (err) {
-      return [];
-    }
+  function stripInlineMarkdown(text) {
+    let s = String(text == null ? "" : text);
+    s = s.replace(/\\\|/g, "|");
+    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, "$1");
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+    s = s.replace(/`([^`]+)`/g, "$1");
+    s = s.replace(/\*\*([^*]+)\*\*/g, "$1");
+    s = s.replace(/__([^_]+)__/g, "$1");
+    s = s.replace(/\*([^*]+)\*/g, "$1");
+    s = s.replace(/_([^_]+)_/g, "$1");
+    s = s.replace(/~~([^~]+)~~/g, "$1");
+    return s;
   }
 
-  // 统一入口：Markdown 走 Markdown 解析链路，否则保持原 TXT 解析链路
-  function parseInput(inputText) {
-    const text = String(inputText || "");
-    if (!text.trim()) return parseText(text);
-    if (!isMarkdownInput(text)) return parseText(text);
-    const words = parseMarkdownToWordEntries(text);
-    const totalLines = normalizeMarkdownLines(text).length;
+  function isMarkdownHeadingLine(line) {
+    return /^\s*#{1,6}\s+/.test(String(line || ""));
+  }
+
+  function isMarkdownTableSeparatorLine(line) {
+    const s = String(line || "").trim();
+    if (!s) return false;
+    return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(s);
+  }
+
+  function countChar(str, ch) {
+    const s = String(str || "");
+    let n = 0;
+    for (let i = 0; i < s.length; i += 1) {
+      if (s[i] === ch) n += 1;
+    }
+    return n;
+  }
+
+  function isMarkdownTableRowCandidate(line) {
+    const s = String(line || "");
+    if (!s.includes("|")) return false;
+    return countChar(s, "|") >= 2;
+  }
+
+  function splitMarkdownCells(line) {
+    let s = String(line || "").trim();
+    if (!s) return [];
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+
+    const cells = [];
+    let cur = "";
+    for (let i = 0; i < s.length; i += 1) {
+      const ch = s[i];
+      const prev = i > 0 ? s[i - 1] : "";
+      if (ch === "|" && prev !== "\\") {
+        cells.push(cur);
+        cur = "";
+        continue;
+      }
+      cur += ch;
+    }
+    cells.push(cur);
+
+    return cells
+      .map((c) => stripInlineMarkdown(c).replace(/\\\|/g, "|"))
+      .map((c) => String(c || "").replace(/\s+/g, " ").trim());
+  }
+
+  function isMarkdownTableHeaderRow(cells) {
+    const list = Array.isArray(cells) ? cells : [];
+    if (!list.length) return false;
+    const joined = list.join(" ").toLowerCase();
+    if (joined.includes("词性") || joined.includes("pos")) {
+      if (joined.includes("释义") || joined.includes("meaning")) return true;
+    }
+    return false;
+  }
+
+  function parseMarkdownListItemLine(line) {
+    const raw = String(line || "");
+    const m = raw.match(/^\s*[-*+]\s+(.+)$/);
+    if (!m) return null;
+    const content = cleanRawLine(m[1]);
+    if (!content) return null;
+
+    if (content.includes("|") && countChar(content, "|") >= 2) {
+      const cells = splitMarkdownCells(content);
+      if (cells.length < 3) return null;
+      const term = normalizeTerm(cells[0]);
+      const pos = normalizeTerm(cells[1]);
+      const meaning = normalizeMeaning(cells[2]);
+      if (!term || !meaning) return null;
+      return { term, pos, meaning };
+    }
+
+    const m2 = content.match(/^(.+?)\s*[:：]\s*(.+)$/);
+    if (m2) {
+      const term = normalizeTerm(stripInlineMarkdown(m2[1]));
+      const meaning = normalizeMeaning(stripInlineMarkdown(m2[2]));
+      if (!term || !meaning) return null;
+      return { term, pos: "", meaning };
+    }
+
+    return null;
+  }
+
+  function parseMarkdownText(inputText) {
+    const rawLines = splitLines(String(inputText || ""));
+    const words = [];
+
+    for (let i = 0; i < rawLines.length; i += 1) {
+      const s = cleanRawLine(rawLines[i]);
+      if (!s) continue;
+      if (isMarkdownHeadingLine(s)) continue;
+      if (isMarkdownTableSeparatorLine(s)) continue;
+
+      const listItemWord = parseMarkdownListItemLine(s);
+      if (listItemWord) {
+        words.push(listItemWord);
+        continue;
+      }
+
+      if (!isMarkdownTableRowCandidate(s)) continue;
+
+      const next = i + 1 < rawLines.length ? cleanRawLine(rawLines[i + 1]) : "";
+      if (next && isMarkdownTableSeparatorLine(next)) {
+        i += 1;
+        continue;
+      }
+
+      const cells = splitMarkdownCells(s);
+      if (cells.length < 3) continue;
+      if (isMarkdownTableHeaderRow(cells)) continue;
+
+      const term = normalizeTerm(cells[0]);
+      const pos = normalizeTerm(cells[1]);
+      const meaning = normalizeMeaning(cells[2]);
+      if (!term || !meaning) continue;
+
+      words.push({ term, pos, meaning });
+    }
+
     return {
       words,
       stats: {
-        totalLines,
+        totalLines: rawLines.length,
         parsedLines: words.length,
-        skippedLines: Math.max(0, totalLines - words.length),
+        skippedLines: Math.max(0, rawLines.length - words.length),
       },
     };
+  }
+
+  function isLikelyMarkdown(inputText) {
+    const rawLines = splitLines(String(inputText || ""));
+    let pipeRowCount = 0;
+    let hasLeadingPipeRow = false;
+
+    for (const line of rawLines) {
+      const s = String(line || "");
+      if (!s.trim()) continue;
+      if (isMarkdownTableSeparatorLine(s)) return true;
+      if (/^\s*[-*+]\s+.+\|.+\|.+/.test(s)) return true;
+      if (isMarkdownTableRowCandidate(s)) {
+        pipeRowCount += 1;
+        if (/^\s*\|/.test(s)) hasLeadingPipeRow = true;
+      }
+      if (pipeRowCount >= 2 && hasLeadingPipeRow) return true;
+    }
+
+    return false;
   }
 
   function buildLexiconObject(meta, words) {
@@ -460,13 +354,8 @@
   LexiForge.Parser = {
     POS_TOKENS,
     parseText,
-    // Markdown support
-    parseInput,
-    isMarkdownInput,
-    parseMarkdownToWordEntries,
-    parseMarkdownTable,
-    stripMarkdownInlineSyntax,
-    normalizeMarkdownLines,
+    parseMarkdownText,
+    isLikelyMarkdown,
     buildLexiconObject,
   };
 })();
